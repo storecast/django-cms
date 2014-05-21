@@ -261,9 +261,37 @@ class Placeholder(Tag):
 
             return ''
 
+        layout_level = context.get('layout_level')
+
+        # txtr_skins edit: placeholder existence check added
+        try:
+            placeholder = page.placeholders.get(slot=name, layout_level=layout_level)
+        except Placeholder.DoesNotExist:
+            from cms.utils.plugins import get_placeholders
+            placeholder_identifiers = get_placeholders(page.get_template())
+            found = None
+            for slot, layout_level in placeholder_identifiers:
+                new, created = page.placeholders.get_or_create(slot=slot, layout_level=layout_level)
+                if slot == name:
+                    found = new
+            placeholder = found
+            if not found:
+                if settings.DEBUG:
+                    raise Placeholder.DoesNotExist("No placeholder '%s' found for page '%s'" % (name, page.pk))
+                else:
+                    return "<!-- ERROR:cms.utils.plugins.get_placeholders:%s -->" % name
+        # txtr_skins edit: end placeholder existence check
+
         content = get_placeholder_content(context, request, page, name, inherit)
         if not content and nodelist:
             return nodelist.render(context)
+
+        if not content:
+            if nodelist:
+                content = nodelist.render(context)
+            if self.edit_mode(placeholder, context): # txtr_skins edit: I dunno
+                return render_placeholder_toolbar(placeholder, context, content)
+
         return content
 
     def get_name(self):

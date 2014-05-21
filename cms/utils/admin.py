@@ -73,6 +73,7 @@ def get_admin_menu_item_context(request, page, filtered=False):
         'lang': lang,
         'filtered': filtered,
         'metadata': metadata,
+        'request': request,
         'css_class': css_class,
         
         'has_change_permission': page.has_change_permission(request),

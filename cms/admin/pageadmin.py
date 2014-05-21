@@ -52,6 +52,9 @@ from cms.utils.plugins import current_site
 from cms.plugins.utils import has_reached_plugin_limit
 from menus.menu_pool import menu_pool
 
+from apps.jinja_lib.ext.djangojinja2 import get_placeholders
+
+
 DJANGO_1_4 = LooseVersion(django.get_version()) < LooseVersion('1.5')
 require_POST = method_decorator(require_POST)
 
@@ -75,7 +78,7 @@ def contribute_fieldsets(cls):
     additional_hidden_fields = []
     advanced_fields = ['reverse_id', 'overwrite_url', 'redirect', 'login_required', 'limit_visibility_in_menu']
     template_fields = ['template']
-    hidden_fields = ['site', 'parent']
+    hidden_fields = ['site', 'parent', 'template']
     seo_fields = []
     if get_cms_setting('SOFTROOT'):
         advanced_fields.append('soft_root')
@@ -100,11 +103,6 @@ def contribute_fieldsets(cls):
         (None, {
             'fields': general_fields,
             'classes': ('general',),
-        }),
-        (_('Basic Settings'), {
-            'fields': template_fields,
-            'classes': ('low',),
-            'description': _('Note: This page reloads if you change the selection. Save it first.'),
         }),
         (_('Hidden'), {
             'fields': hidden_fields + additional_hidden_fields,
@@ -298,16 +296,21 @@ class PageAdmin(ModelAdmin):
                 fields = list(given_fieldsets[0][1]['fields'][2])
                 fields.remove('published')
                 given_fieldsets[0][1]['fields'][2] = tuple(fields)
-            placeholders_template = get_template_from_request(request, obj)
-            for placeholder_name in self.get_fieldset_placeholders(placeholders_template):
-                name = placeholder_utils.get_placeholder_conf("name", placeholder_name, obj.template, placeholder_name)
+
+            # edited by txtr skins, placeholder_identifiers are a list of 2-tuples with the format (slot, layout_level) 
+            placeholder_identifiers = get_placeholders(obj.layouts)
+            for placeholder_slot, placeholder_level in placeholder_identifiers:
+                name = placeholder_utils.get_placeholder_conf("name", placeholder_slot, obj.template, placeholder_slot)
                 name = _(name)
-                given_fieldsets += [(title(name), {'fields': [placeholder_name], 'classes': ['plugin-holder']})]
-            advanced = given_fieldsets.pop(3)
+                pretty_id = Placeholder.pretty_id(layout_level=placeholder_level, slot=placeholder_slot)
+                given_fieldsets += [(title(pretty_id), {'fields':[pretty_id], 'classes':['plugin-holder']})]
+            if get_cms_setting('SEO_FIELDS'):
+                seo = given_fieldsets.pop()
+            advanced = given_fieldsets.pop()
+
             if obj.has_advanced_settings_permission(request):
                 given_fieldsets.append(advanced)
             if get_cms_setting('SEO_FIELDS'):
-                seo = given_fieldsets.pop(3)
                 given_fieldsets.append(seo)
         else: # new page
             given_fieldsets = deepcopy(self.add_fieldsets)
@@ -368,8 +371,11 @@ class PageAdmin(ModelAdmin):
                 form.base_fields['template'].choices = template_choices
                 form.base_fields['template'].initial = force_unicode(selected_template)
 
-            placeholders = self.get_fieldset_placeholders(selected_template)
-            for placeholder_name in placeholders:
+            # edited by txtr skins, placeholder_identifiers are a list of 2-tuples with the format (slot, layout_level) 
+            placeholders = get_placeholders(obj.layouts)
+            for placeholder_slot, placeholder_layout_level in placeholders:
+                placeholder, created = obj.placeholders.get_or_create(slot=placeholder_slot, layout_level=placeholder_layout_level)
+                installed_plugins = plugin_pool.get_all_plugins(placeholder_slot, obj)
                 plugin_list = []
                 show_copy = False
                 copy_languages = {}
@@ -412,8 +418,6 @@ class PageAdmin(ModelAdmin):
                             bases[int(plugin.cmsplugin_ptr_id)].set_base_attr(plugin)
                             plugin_list.append(plugin)
                 else:
-                    placeholder, created = obj.placeholders.get_or_create(slot=placeholder_name)
-                    installed_plugins = plugin_pool.get_all_plugins(placeholder_name, obj)
                     plugin_list = CMSPlugin.objects.filter(language=language, placeholder=placeholder,
                                                            parent=None).order_by('position')
                     other_plugins = CMSPlugin.objects.filter(placeholder=placeholder, parent=None).exclude(
@@ -434,7 +438,8 @@ class PageAdmin(ModelAdmin):
                     'language': language,
                     'placeholder': placeholder
                 })
-                form.base_fields[placeholder.slot] = CharField(widget=widget, required=False)
+                # txtr skins: from .slot to Placeholder.pretty_id
+                form.base_fields[Placeholder.pretty_id(placeholder)] = CharField(widget=widget, required=False)
 
             if not obj.has_advanced_settings_permission(request):
                 for field in self.advanced_fields:
@@ -445,7 +450,7 @@ class PageAdmin(ModelAdmin):
             for name in ['slug', 'title']:
                 form.base_fields[name].initial = u''
             form.base_fields['parent'].initial = request.GET.get('target', None)
-            form.base_fields['site'].initial = request.session.get('cms_admin_site', None)
+            form.base_fields['site'].initial = Site.objects.get_current()
             form.base_fields['template'].initial = get_cms_setting('TEMPLATES')[0][0]
 
         return form
@@ -515,7 +520,9 @@ class PageAdmin(ModelAdmin):
 
             #activate(user_lang_set)
             context = {
-                'placeholders': self.get_fieldset_placeholders(selected_template),
+                # 'placeholders': plugins.get_placeholders(selected_template),
+                # txtr skins edit; from slot to Placeholder.pretty_id identifier
+                'placeholders': [Placeholder.pretty_id(layout_level=layout_level, slot=slot,) for slot, layout_level in get_placeholders(obj.layouts)],
                 'page': obj,
                 'CMS_PERMISSION': get_cms_setting('PERMISSION'),
                 'ADMIN_MEDIA_URL': settings.STATIC_URL,
@@ -1345,7 +1352,7 @@ class PageAdmin(ModelAdmin):
         pos = 0
         page = None
         success = False
-        if 'plugin_id' in request.POST:
+        if 'plugin_id' in request.POST and 'placeholder_id' in request.POST:
             plugin = CMSPlugin.objects.get(pk=int(request.POST['plugin_id']))
             if not permissions.has_plugin_permission(request.user, plugin.plugin_type, "change"):
                 return HttpResponseForbidden(_('You do not have permission to edit a plugin'))
@@ -1354,11 +1361,16 @@ class PageAdmin(ModelAdmin):
             if not page.has_change_permission(request):
                 return HttpResponseForbidden(_("You do not have permission to change this page"))
 
-            placeholder_slot = request.POST['placeholder']
-            placeholders = self.get_fieldset_placeholders(page.get_template())
-            if not placeholder_slot in placeholders:
+            #txtr_skins: rewrite to support layout_level
+            try:
+                placeholder = Placeholder.objects.get(pk=request.POST['placeholder_id'])
+            except Placeholder.DoesNotExist:
                 return HttpResponseBadRequest(str("error"))
-            placeholder = page.placeholders.get(slot=placeholder_slot)
+
+            placeholders = get_placeholders(page.layouts)
+            if not (placeholder.slot, placeholder.layout_level,) in placeholders:
+                return HttpResponse(str("error"))
+
             try:
                 has_reached_plugin_limit(placeholder, plugin.plugin_type, plugin.language, template=page.get_template())
             except PluginLimitReached, e:

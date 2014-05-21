@@ -136,10 +136,6 @@ class CMSToolbar(Toolbar):
                     if self.revert_button.is_enabled_for(self.request):
                         items.append(self.revert_button)
 
-                # The 'templates' Menu
-                if can_change:
-                    items.append(self.get_template_menu(context, can_change, is_staff))
-
                 # The 'page' Menu
                 items.append(self.get_page_menu(context, can_change, is_staff))
 

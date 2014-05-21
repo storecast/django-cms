@@ -19,10 +19,11 @@ from django.conf import settings
 from django.conf.urls.defaults import patterns
 from django.core.urlresolvers import resolve, Resolver404, reverse
 from django.http import Http404, HttpResponseRedirect
-from django.shortcuts import render_to_response
 from django.template.context import RequestContext
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import urlquote
+
+from apps.layouts.utils import render_to_response
 
 
 def _handle_no_page(request, slug):

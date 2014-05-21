@@ -168,7 +168,8 @@ class CMSPlugin(MPTTModel):
             if not isinstance(placeholder, Placeholder):
                 placeholder = instance.placeholder
             placeholder_slot = placeholder.slot
-            current_app = context.current_app if context else None
+            page = context['current_page']
+            current_app = page.reverse_id if page.reverse_id else None
             context = PluginContext(context, instance, placeholder, current_app=current_app)
             context = plugin.render(context, instance, placeholder_slot)
             if plugin.render_plugin:
@@ -313,10 +314,11 @@ class CMSPlugin(MPTTModel):
         """
         position = self.position
         slot = self.placeholder.slot
+        layout_level = self.placeholder.layout_level # txtr_skins was here
         page = self.placeholder.page
         if page and getattr(page, 'publisher_public'):
             try:
-                placeholder = Placeholder.objects.get(page=page.publisher_public, slot=slot)
+                placeholder = Placeholder.objects.get(page=page.publisher_public, slot=slot, layout_level=layout_level) # txtr_skins was here
             except Placeholder.DoesNotExist:
                 pass
             else:

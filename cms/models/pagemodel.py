@@ -39,9 +39,7 @@ class Page(MPTTModel):
     PUBLISHER_STATE_DELETE = 2
     # Page was marked published, but some of page parents are not.
     PUBLISHER_STATE_PENDING = 4
-
-    template_choices = [(x, _(y)) for x, y in get_cms_setting('TEMPLATES')]
-
+    
     created_by = models.CharField(_("created by"), max_length=70, editable=False)
     changed_by = models.CharField(_("changed by"), max_length=70, editable=False)
     parent = models.ForeignKey('self', null=True, blank=True, related_name='children', db_index=True)
@@ -61,8 +59,7 @@ class Page(MPTTModel):
     navigation_extenders = models.CharField(_("attached menu"), max_length=80, db_index=True, blank=True, null=True)
     published = models.BooleanField(_("is published"), blank=True)
 
-    template = models.CharField(_("template"), max_length=100, choices=template_choices,
-                                help_text=_('The template used to render the content.'))
+    template = models.CharField(_("template"), max_length=100, help_text=_('The template used to render the content.'), blank=True, default='')
     site = models.ForeignKey(Site, help_text=_('The site the page is accessible at.'), verbose_name=_("site"))
 
     login_required = models.BooleanField(_("login required"), default=False)
@@ -190,7 +187,7 @@ class Page(MPTTModel):
         for ph in self.placeholders.all():
             plugins = ph.get_plugins_list()
             try:
-                ph = target.placeholders.get(slot=ph.slot)
+                ph = target.placeholders.get(slot=ph.slot, layout_level=ph.layout_level)
             except Placeholder.DoesNotExist:
                 ph.pk = None  # make a new instance
                 ph.save()
@@ -1087,23 +1084,35 @@ class Page(MPTTModel):
 
         return obj
 
-    def rescan_placeholders(self):
+    def rescan_placeholders(self): # txtr_skins entire function replaced
         """
-        Rescan and if necessary create placeholders in the current template.
+        Update/Create the placeholder objects for the given page instance.
+        This functions is also used as a post_save signal handler for the Page class.
+        Does nothing while dumps loading to avoid the errors while placeholders creation.
         """
-        # inline import to prevent circular imports
-        from cms.utils.plugins import get_placeholders
+        import os
+        if 'DJANGO_DUMPS_LOADING' in os.environ:
+            # don't rescan
+            return
+        from apps.jinja_lib.ext.djangojinja2 import get_placeholders
 
-        placeholders = get_placeholders(self.get_template())
-        found = {}
-        for placeholder in self.placeholders.all():
-            if placeholder.slot in placeholders:
-                found[placeholder.slot] = placeholder
-        for placeholder_name in placeholders:
-            if not placeholder_name in found:
-                placeholder = Placeholder.objects.create(slot=placeholder_name)
-                self.placeholders.add(placeholder)
-                found[placeholder_name] = placeholder
+        # a set of 2-tuples with slot name and layout level of a placeholder
+        desired_placeholders = set(get_placeholders(self.layouts))
+
+        for placeholder in self.placeholders.all(): # here we iterate over actual placeholder objects
+            if (placeholder.slot, placeholder.layout_level,) in desired_placeholders:
+                # this placeholder can fit into the current template
+                desired_placeholders.remove((placeholder.slot, placeholder.layout_level,))
+            else:
+                # this placeholder cannot fit into the current template
+                for plugin in placeholder.get_plugins():
+                    plugin.delete()
+                placeholder.delete()
+
+        for slot, layout_level in desired_placeholders:
+            # these placeholders don't exist on the page, but they should
+            placeholder = Placeholder.objects.create(slot=slot, layout_level=layout_level)
+            self.placeholders.add(placeholder)
 
 
 def _reversion():

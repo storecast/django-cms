@@ -9,8 +9,10 @@ from cms.utils.placeholder import get_placeholder_conf
 from django.conf import settings
 from django.template import Template, Context
 from django.template.defaultfilters import title
-from django.template.loader import render_to_string
 from django.utils.translation import ugettext_lazy as _
+from apps.jinja_lib.ext.djangojinja2 import render_to_string
+from jinja2.environment import Template as JinjaTemplate
+
 
 # these are always called before all other plugin context processors
 DEFAULT_PLUGIN_CONTEXT_PROCESSORS = (
@@ -51,7 +53,7 @@ def render_plugin(context, instance, placeholder, template, processors=None,
         processors = []
     if isinstance(template, basestring):
         content = render_to_string(template, context_instance=context)
-    elif isinstance(template, Template):
+    elif isinstance(template, (Template, JinjaTemplate)):
         content = template.render(context)
     else:
         content = ''
@@ -158,6 +160,7 @@ def render_placeholder_toolbar(placeholder, context, content, name_fallback=None
     context['placeholder_label'] = name
     context['placeholder'] = placeholder
     context['page'] = page
+    context['request'] = request
     toolbar = render_to_string("cms/toolbar/placeholder.html", context)
     context.pop()
     return "".join([toolbar, content])

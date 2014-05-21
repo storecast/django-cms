@@ -15,26 +15,20 @@ from cms.utils.permissions import get_subordinate_users
 
 class PageUserAdmin(UserAdmin, GenericCmsPermissionAdmin):
     form = PageUserForm
-    add_form = PageUserForm
     model = PageUser
+    readonly_fields = ('username',)
     
     list_display = ('username', 'email', 'first_name', 'last_name', 'created_by')
     
     # get_fieldsets method may add fieldsets depending on user
     fieldsets = [
-        (None, {'fields': ('username', ('password1', 'password2'), 'notify_user')}),
-        (_('User details'), {'fields': (('first_name', 'last_name'), 'email')}),
+        (None, {'fields': ('username',)}), # txtr skins edit
+        (_('User details'), {'fields': (('first_name', 'last_name'), 'email', 'notify_user')}), # txtr skins edit
         (_('Groups'), {'fields': ('groups',)}),
     ]
     
-    add_fieldsets = fieldsets
-    
     def get_fieldsets(self, request, obj=None):
         fieldsets = self.update_permission_fieldsets(request, obj)
-        
-        if not '/add' in request.path:
-            fieldsets[0] = (None, {'fields': ('username', 'notify_user')})
-            fieldsets.append((_('Password'), {'fields': ('password1', 'password2'), 'classes': ('collapse',)}))
         return fieldsets
     
     def queryset(self, request):
@@ -44,9 +38,6 @@ class PageUserAdmin(UserAdmin, GenericCmsPermissionAdmin):
             return qs.filter(pk__in=user_id_set)
         except NoPermissionsException:
             return self.model.objects.get_empty_query_set()
-    
-    def add_view(self, request):
-        return super(UserAdmin, self).add_view(request) 
     
 class PageUserGroupAdmin(admin.ModelAdmin, GenericCmsPermissionAdmin):
     form = PageUserGroupForm
@@ -61,4 +52,3 @@ class PageUserGroupAdmin(admin.ModelAdmin, GenericCmsPermissionAdmin):
 
 if get_cms_setting('PERMISSION'):
     admin.site.register(PageUser, PageUserAdmin)
-    admin.site.register(PageUserGroup, PageUserGroupAdmin)

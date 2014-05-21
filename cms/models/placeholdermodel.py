@@ -11,12 +11,13 @@ import operator
 class Placeholder(models.Model):
     slot = models.CharField(_("slot"), max_length=50, db_index=True, editable=False)
     default_width = models.PositiveSmallIntegerField(_("width"), null=True, editable=False)
+    layout_level = models.PositiveSmallIntegerField(_("layout level"), blank=True, null=True, editable=False) # field added by txtr_skins
 
     class Meta:
         app_label = 'cms'
 
     def __unicode__(self):
-        return self.slot
+        return Placeholder.pretty_id(self) # changed from slot by txtr skins
 
     def get_add_url(self):
         return self._get_url('add_plugin')
@@ -152,5 +153,16 @@ class Placeholder(models.Model):
             field = self._get_attached_field()
             self._actions_cache = getattr(field, 'actions', PlaceholderNoAction())
         return self._actions_cache
+
+    # added by txtr skins
+    @classmethod
+    def pretty_id(cls, instance=None, slot=None, layout_level=None):
+        if type(instance) is Placeholder:
+            slot = instance.slot
+            layout_level = instance.layout_level
+        if layout_level is not None:
+            return "%d : %s" % (layout_level, slot,)
+        else:
+            return "%s" % (slot,)
 
 reversion_register(Placeholder)  # follow=["cmsplugin_set"] not following plugins since they are a spechial case
